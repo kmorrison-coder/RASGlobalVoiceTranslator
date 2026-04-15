@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <title>Global Voice Translator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #FFDAB9; margin: 0; padding: 0; }
+        .neobrutal-shadow { box-shadow: 6px 6px 0px 0px rgba(0,0,0,1); }
+        .source-box { opacity: 0.6; filter: grayscale(1); transform: scale(0.95); background-color: #FFDAB9 !important; }
+        @keyframes pulse-ring {
+            0% { transform: scale(.8); opacity: 0.5; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+        .loading-audio { position: relative; }
+        .loading-audio::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            border: 2px solid black;
+            border-radius: 50%;
+            animation: pulse-ring 1.25s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 selection:bg-orange-200">
+
+    <div class="max-w-7xl mx-auto space-y-6">
+        <!-- Compact Header -->
+        <header class="flex items-center gap-3 mb-2">
+            <div class="bg-black p-2 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFDAB9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+            </div>
+            <h1 class="text-xl font-black uppercase tracking-widest text-black">Global Voice</h1>
+        </header>
+
+        <!-- Input Section -->
+        <div class="relative">
+            <textarea id="promptInput" placeholder="Type your sentence here..." 
+                class="w-full min-h-[140px] p-6 pr-32 text-2xl md:text-3xl font-bold bg-white border-4 border-black rounded-[1.5rem] shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] focus:outline-none placeholder:text-gray-300"></textarea>
+            
+            <div class="absolute bottom-4 right-4 flex gap-2">
+                <button id="clearBtn" class="hidden bg-white border-2 border-black text-black p-3 rounded-xl hover:bg-gray-100 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+                <button id="translateBtn" class="bg-black text-[#FFDAB9] p-3 px-6 rounded-xl hover:scale-105 transition-transform flex items-center gap-2">
+                    <span id="btnText"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></span>
+                </button>
+            </div>
+        </div>
+
+        <div id="errorMessage" class="hidden bg-red-100 border-2 border-red-500 p-4 rounded-xl text-red-700 font-bold"></div>
+
+        <!-- Translation Grid -->
+        <div id="grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Language cards will be injected here -->
+        </div>
+    </div>
+
+    <footer class="mt-12 text-center text-black/30 font-bold uppercase tracking-widest text-[10px]">
+        Voice Translation System • Hosted via GitHub
+    </footer>
+
+    <script>
+        const apiKey = ""; // Runtime provided
+        const modelName = "gemini-2.5-flash-preview-09-2025";
+        const ttsModelName = "gemini-2.5-flash-preview-tts";
+
+        const languages = [
+            { code: 'en', name: 'English', voice: 'Kore' },
+            { code: 'zh-CN', name: 'Chinese (Simplified)', voice: 'Aoede' },
+            { code: 'ko', name: 'Korean', voice: 'Puck' },
+            { code: 'ja', name: 'Japanese', voice: 'Charon' },
+            { code: 'ms', name: 'Malay', voice: 'Leda' }
+        ];
+
+        let currentTranslations = {};
+        let sourceLanguage = null;
+        let activeAudio = null;
+
+        const input = document.getElementById('promptInput');
+        const clearBtn = document.getElementById('clearBtn');
+        const translateBtn = document.getElementById('translateBtn');
+        const grid = document.getElementById('grid');
+        const errorDiv = document.getElementById('errorMessage');
+
+        function renderGrid() {
+            const sorted = [...languages].sort((a, b) => {
+                if (a.name === sourceLanguage) return 1;
+                if (b.name === sourceLanguage) return -1;
+                return 0;
+            });
+
+            grid.innerHTML = sorted.map(lang => {
+                const isSource = lang.name === sourceLanguage;
+                
+                let text = "";
+                if (isSource) {
+                    text = input.value;
+                } else {
+                    // Robust lookup for Mandarin/Chinese skipping
+                    text = currentTranslations[lang.name] || 
+                           currentTranslations[lang.name.split(' ')[0]] || 
+                           currentTranslations["Chinese"] || 
+                           currentTranslations["Mandarin"] ||
+                           "";
+                }
+
+                const statusText = text ? text : '<span class="text-gray-100 italic font-normal text-lg">Waiting...</span>';
+                
+                return `
+                    <div class="border-4 border-black rounded-[1.5rem] p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] flex flex-col min-h-[180px] transition-all duration-500 ${isSource ? 'source-box' : 'bg-[#FFF5EE]'}">
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="bg-black text-[#FFDAB9] px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest">
+                                ${lang.name} ${isSource ? "(Typed)" : ""}
+                            </span>
+                            ${text && text.length > 0 ? `
+                            <button onclick="speak('${lang.name}', \`${text.replace(/`/g, '\\`').replace(/\n/g, ' ')}\`)" 
+                                    id="speak-${lang.name.replace(/[^a-zA-Z]/g, '')}"
+                                    class="p-2 border-2 border-black rounded-lg hover:bg-black hover:text-[#FFDAB9] transition-all bg-white text-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                            </button>` : ''}
+                        </div>
+                        <div class="flex-grow flex items-center">
+                            <p class="text-2xl md:text-3xl font-black text-black leading-tight ${isSource ? 'italic' : ''}">
+                                ${statusText}
+                            </p>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function speak(langName, text) {
+            const langObj = languages.find(l => l.name === langName);
+            const btnId = `speak-${langName.replace(/[^a-zA-Z]/g, '')}`;
+            const btn = document.getElementById(btnId);
+            
+            if (activeAudio) {
+                activeAudio.pause();
+                activeAudio = null;
+            }
+
+            btn.classList.add('loading-audio');
+            btn.disabled = true;
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${ttsModelName}:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: `Say this clearly in ${langName}: ${text}` }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: {
+                                    voiceName: langObj.voice
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const response = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const audioPart = response.candidates[0].content.parts[0].inlineData;
+                const audioData = audioPart.data;
+                const mime = audioPart.mimeType;
+                const sampleRateMatch = mime.match(/rate=(\d+)/);
+                const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1]) : 24000;
+
+                const wavBuffer = pcmToWav(audioData, sampleRate);
+                const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+                const audioUrl = URL.createObjectURL(blob);
+                
+                activeAudio = new Audio(audioUrl);
+                activeAudio.onended = () => {
+                    btn.classList.remove('loading-audio');
+                    btn.disabled = false;
+                };
+                activeAudio.onerror = () => {
+                    btn.classList.remove('loading-audio');
+                    btn.disabled = false;
+                };
+                activeAudio.play();
+            } catch (err) {
+                console.error("TTS Error:", err);
+                btn.classList.remove('loading-audio');
+                btn.disabled = false;
+            }
+        }
+
+        function pcmToWav(base64Pcm, sampleRate) {
+            const binaryString = window.atob(base64Pcm);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+            
+            const buffer = new ArrayBuffer(44 + bytes.length);
+            const view = new DataView(buffer);
+
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + bytes.length, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); 
+            view.setUint16(22, 1, true); 
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, bytes.length, true);
+
+            const pcmData = new Uint8Array(buffer, 44);
+            pcmData.set(bytes);
+
+            return buffer;
+        }
+
+        async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Status ${response.status}: ${errorText}`);
+                }
+                return await response.json();
+            } catch (err) {
+                if (retries <= 0) throw err;
+                await new Promise(resolve => setTimeout(resolve, backoff));
+                return fetchWithRetry(url, options, retries - 1, backoff * 2);
+            }
+        }
+
+        async function translate() {
+            const text = input.value.trim();
+            if (!text) return;
+
+            translateBtn.disabled = true;
+            document.getElementById('btnText').innerHTML = '<svg class="animate-spin h-5 w-5 text-[#FFDAB9]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            errorDiv.classList.add('hidden');
+
+            const systemPrompt = `Translate to: English, Chinese (Simplified), Korean, Japanese, Malay. 
+            Identify the source language you detected. 
+            Return ONLY a valid JSON object:
+            {
+              "detectedSource": "The language name typed",
+              "translations": {
+                "English": "...",
+                "Chinese (Simplified)": "...",
+                "Korean": "...",
+                "Japanese": "...",
+                "Malay": "..."
+              }
+            }`;
+
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+                const data = await fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text }] }],
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                        generationConfig: { responseMimeType: "application/json" }
+                    })
+                });
+
+                const content = data.candidates[0].content.parts[0].text;
+                const result = JSON.parse(content);
+                
+                currentTranslations = result.translations;
+                sourceLanguage = result.detectedSource;
+                renderGrid();
+            } catch (err) {
+                console.error("Translation error:", err);
+                errorDiv.innerText = "Connection error. Ensure your prompt is valid and try again.";
+                errorDiv.classList.remove('hidden');
+            } finally {
+                translateBtn.disabled = false;
+                document.getElementById('btnText').innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+            }
+        }
+
+        input.addEventListener('input', () => {
+            clearBtn.classList.toggle('hidden', !input.value);
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                translate();
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            input.value = '';
+            currentTranslations = {};
+            sourceLanguage = null;
+            clearBtn.classList.add('hidden');
+            renderGrid();
+        });
+
+        translateBtn.addEventListener('click', translate);
+
+        renderGrid();
+    </script>
+</body>
+</html>
