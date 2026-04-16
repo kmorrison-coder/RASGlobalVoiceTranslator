@@ -11,6 +11,19 @@
         body { font-family: 'Inter', sans-serif; background-color: #FFDAB9; margin: 0; padding: 0; }
         .neobrutal-shadow { box-shadow: 6px 6px 0px 0px rgba(0,0,0,1); }
         .source-box { opacity: 0.6; filter: grayscale(1); transform: scale(0.95); background-color: #FFDAB9 !important; }
+        
+        /* Custom Scrollbar for Neo-brutalism look */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #000;
+            border-radius: 10px;
+        }
+
         @keyframes pulse-ring {
             0% { transform: scale(.8); opacity: 0.5; }
             100% { transform: scale(1.2); opacity: 0; }
@@ -104,7 +117,6 @@
                 if (isSource) {
                     text = input.value;
                 } else {
-                    // Robust lookup for Mandarin/Chinese skipping
                     text = currentTranslations[lang.name] || 
                            currentTranslations[lang.name.split(' ')[0]] || 
                            currentTranslations["Chinese"] || 
@@ -115,8 +127,8 @@
                 const statusText = text ? text : '<span class="text-gray-100 italic font-normal text-lg">Waiting...</span>';
                 
                 return `
-                    <div class="border-4 border-black rounded-[1.5rem] p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] flex flex-col min-h-[180px] transition-all duration-500 ${isSource ? 'source-box' : 'bg-[#FFF5EE]'}">
-                        <div class="flex justify-between items-center mb-3">
+                    <div class="border-4 border-black rounded-[1.5rem] p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] flex flex-col h-[280px] transition-all duration-500 ${isSource ? 'source-box' : 'bg-[#FFF5EE]'}">
+                        <div class="flex justify-between items-center mb-3 flex-shrink-0">
                             <span class="bg-black text-[#FFDAB9] px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest">
                                 ${lang.name} ${isSource ? "(Typed)" : ""}
                             </span>
@@ -127,8 +139,8 @@
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
                             </button>` : ''}
                         </div>
-                        <div class="flex-grow flex items-center">
-                            <p class="text-2xl md:text-3xl font-black text-black leading-tight ${isSource ? 'italic' : ''}">
+                        <div class="flex-grow overflow-y-auto custom-scrollbar pr-2 py-2">
+                            <p class="text-xl md:text-2xl font-black text-black leading-snug whitespace-pre-wrap ${isSource ? 'italic' : ''}">
                                 ${statusText}
                             </p>
                         </div>
@@ -168,7 +180,6 @@
 
                 const response = await fetchWithRetry(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
@@ -204,16 +215,11 @@
             const len = binaryString.length;
             const bytes = new Uint8Array(len);
             for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
-            
             const buffer = new ArrayBuffer(44 + bytes.length);
             const view = new DataView(buffer);
-
             const writeString = (offset, string) => {
-                for (let i = 0; i < string.length; i++) {
-                    view.setUint8(offset + i, string.charCodeAt(i));
-                }
+                for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
             };
-
             writeString(0, 'RIFF');
             view.setUint32(4, 36 + bytes.length, true);
             writeString(8, 'WAVE');
@@ -227,24 +233,19 @@
             view.setUint16(34, 16, true);
             writeString(36, 'data');
             view.setUint32(40, bytes.length, true);
-
             const pcmData = new Uint8Array(buffer, 44);
             pcmData.set(bytes);
-
             return buffer;
         }
 
         async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
             try {
                 const response = await fetch(url, options);
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Status ${response.status}: ${errorText}`);
-                }
+                if (!response.ok) throw new Error(await response.text());
                 return await response.json();
             } catch (err) {
                 if (retries <= 0) throw err;
-                await new Promise(resolve => setTimeout(resolve, backoff));
+                await new Promise(r => setTimeout(r, backoff));
                 return fetchWithRetry(url, options, retries - 1, backoff * 2);
             }
         }
@@ -257,25 +258,12 @@
             document.getElementById('btnText').innerHTML = '<svg class="animate-spin h-5 w-5 text-[#FFDAB9]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
             errorDiv.classList.add('hidden');
 
-            const systemPrompt = `Translate to: English, Chinese (Simplified), Korean, Japanese, Malay. 
-            Identify the source language you detected. 
-            Return ONLY a valid JSON object:
-            {
-              "detectedSource": "The language name typed",
-              "translations": {
-                "English": "...",
-                "Chinese (Simplified)": "...",
-                "Korean": "...",
-                "Japanese": "...",
-                "Malay": "..."
-              }
-            }`;
+            const systemPrompt = `Translate to: English, Chinese (Simplified), Korean, Japanese, Malay. Identify source. Return ONLY JSON: {"detectedSource": "Name", "translations": {"English": "...", "Chinese (Simplified)": "...", "Korean": "...", "Japanese": "...", "Malay": "..."}}`;
 
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
                 const data = await fetchWithRetry(url, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text }] }],
                         systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -285,12 +273,10 @@
 
                 const content = data.candidates[0].content.parts[0].text;
                 const result = JSON.parse(content);
-                
                 currentTranslations = result.translations;
                 sourceLanguage = result.detectedSource;
                 renderGrid();
             } catch (err) {
-                console.error("Translation error:", err);
                 errorDiv.innerText = "Connection error. Ensure your prompt is valid and try again.";
                 errorDiv.classList.remove('hidden');
             } finally {
@@ -299,27 +285,10 @@
             }
         }
 
-        input.addEventListener('input', () => {
-            clearBtn.classList.toggle('hidden', !input.value);
-        });
-
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                translate();
-            }
-        });
-
-        clearBtn.addEventListener('click', () => {
-            input.value = '';
-            currentTranslations = {};
-            sourceLanguage = null;
-            clearBtn.classList.add('hidden');
-            renderGrid();
-        });
-
+        input.addEventListener('input', () => clearBtn.classList.toggle('hidden', !input.value));
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); translate(); } });
+        clearBtn.addEventListener('click', () => { input.value = ''; currentTranslations = {}; sourceLanguage = null; clearBtn.classList.add('hidden'); renderGrid(); });
         translateBtn.addEventListener('click', translate);
-
         renderGrid();
     </script>
 </body>
