@@ -241,14 +241,16 @@
 
         async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
             try {
+                // Ensure no custom headers are sent if not necessary to avoid preflight issues
                 const response = await fetch(url, {
-                    ...options,
-                    cache: 'no-store',
-                    mode: 'cors'
+                    method: options.method,
+                    headers: options.headers || {},
+                    body: options.body
                 });
+                
                 if (!response.ok) {
                     const text = await response.text();
-                    throw new Error(`Server returned ${response.status}: ${text}`);
+                    throw new Error(`Server status ${response.status}: ${text}`);
                 }
                 return await response.json();
             } catch (err) {
@@ -269,29 +271,37 @@
             const systemPrompt = `Translate to: English, Chinese (Simplified), Korean, Japanese, Malay. Identify source. Return ONLY JSON: {"detectedSource": "Name", "translations": {"English": "...", "Chinese (Simplified)": "...", "Korean": "...", "Japanese": "...", "Malay": "..."}}`;
 
             try {
+                // Construct the prompt carefully
+                const payload = {
+                    contents: [{ parts: [{ text: text }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: { 
+                        responseMimeType: "application/json",
+                        temperature: 0.1 
+                    }
+                };
+
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+                
                 const data = await fetchWithRetry(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text }] }],
-                        systemInstruction: { parts: [{ text: systemPrompt }] },
-                        generationConfig: { responseMimeType: "application/json" }
-                    })
+                    body: JSON.stringify(payload)
                 });
 
-                if (!data.candidates || data.candidates.length === 0) {
-                    throw new Error("No translation results returned.");
+                if (!data.candidates || !data.candidates[0].content || !data.candidates[0].content.parts) {
+                    throw new Error("Invalid response format from API.");
                 }
 
                 const content = data.candidates[0].content.parts[0].text;
                 const result = JSON.parse(content);
-                currentTranslations = result.translations;
-                sourceLanguage = result.detectedSource;
+                
+                currentTranslations = result.translations || {};
+                sourceLanguage = result.detectedSource || "Unknown";
                 renderGrid();
             } catch (err) {
-                console.error("Detailed error:", err);
-                errorDiv.innerText = `Connection issue: ${err.message || "Please check your network and try again."}`;
+                console.error("Translation error details:", err);
+                errorDiv.innerText = `Network/API Error: ${err.message}`;
                 errorDiv.classList.remove('hidden');
             } finally {
                 translateBtn.disabled = false;
