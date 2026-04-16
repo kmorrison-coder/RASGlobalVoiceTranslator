@@ -180,6 +180,7 @@
 
                 const response = await fetchWithRetry(url, {
                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
@@ -240,8 +241,15 @@
 
         async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
             try {
-                const response = await fetch(url, options);
-                if (!response.ok) throw new Error(await response.text());
+                const response = await fetch(url, {
+                    ...options,
+                    cache: 'no-store',
+                    mode: 'cors'
+                });
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`Server returned ${response.status}: ${text}`);
+                }
                 return await response.json();
             } catch (err) {
                 if (retries <= 0) throw err;
@@ -264,6 +272,7 @@
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
                 const data = await fetchWithRetry(url, {
                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [{ text }] }],
                         systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -271,13 +280,18 @@
                     })
                 });
 
+                if (!data.candidates || data.candidates.length === 0) {
+                    throw new Error("No translation results returned.");
+                }
+
                 const content = data.candidates[0].content.parts[0].text;
                 const result = JSON.parse(content);
                 currentTranslations = result.translations;
                 sourceLanguage = result.detectedSource;
                 renderGrid();
             } catch (err) {
-                errorDiv.innerText = "Connection error. Ensure your prompt is valid and try again.";
+                console.error("Detailed error:", err);
+                errorDiv.innerText = `Connection issue: ${err.message || "Please check your network and try again."}`;
                 errorDiv.classList.remove('hidden');
             } finally {
                 translateBtn.disabled = false;
